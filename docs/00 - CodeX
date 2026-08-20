@@ -1,0 +1,134 @@
+Instruksjoner for CodeX / OpenAI
+
+Version 1.0
+Tittel: Snake
+
+Formål
+Snake skal være et terminalspill skrevet i C for Linux Mint. ZSH brukes
+som kommandoskall. Terminalstyring og farger kan implementeres med
+POSIX-funksjoner og ANSI-sekvenser.
+
+Hovedmeny
+Ved oppstart skal programmet vise topplisten og en hovedmeny. Spilleren
+skal kunne starte et nytt spill eller avslutte programmet. Etter game over
+skal topplisten vises før programmet går tilbake til hovedmenyen.
+
+Spiller
+Spilleren skal skrive inn navnet sitt før et nytt spill starter. Navnet må
+inneholde fra 1 til 50 tegn. Et tomt navn skal avvises.
+
+Spillebrett
+Spilleren skal velge brettstørrelse ved starten av et nytt spill:
+
+1. Standard:    40 x 20 tegnruter (standardvalg)
+2. Kompakt:     30 x 15 tegnruter
+3. Stor:        60 x 25 tegnruter
+4. Ekstra stor: 80 x 35 tegnruter
+
+Målene inkluderer ytterveggen. Programmet skal kontrollere terminalens
+faktiske størrelse og ikke tillate et brett som ikke får plass.
+
+Visning
+Ytterveggen skal tegnes med hvite '*'. Slangen skal tegnes med røde 'S',
+og maten skal tegnes med en gul 'O'.
+
+Spilleregler
+- Slangen starter med en lengde på tre tegnruter.
+- Slangen starter midt på brettet og beveger seg mot høyre.
+- Slangen styres med piltastene.
+- Mat skal aldri plasseres på veggen eller slangens kropp.
+- Når slangen spiser en 'O', vokser den med én tegnrute.
+- Kollisjon med ytterveggen avslutter spillet.
+- Kollisjon med slangens egen kropp avslutter spillet.
+- Esc avslutter det aktive spillet frivillig.
+
+Hastighet
+Starthastigheten skal være fartsnivå 1, med ett steg hvert 200 ms.
+Fartsnivået øker med +1 for hver 'O' som blir spist. Hvert nivå reduserer
+bevegelsesintervallet med 10 ms. Intervallet skal aldri bli kortere enn
+50 ms.
+
+Toppliste
+Topplisten skal lagres i filen "toppliste.txt" og inneholde spillernavn og
+sluttlengde for de ti beste resultatene. Resultatene sorteres etter lengde,
+fra høyest til lavest. Like resultater er tillatt. Ved lik lengde skal
+resultatet som ble oppnådd først stå øverst.
+
+Topplisten skal vises ved programstart og etter game over. Hvis filen ikke
+finnes, skal programmet opprette den automatisk. Ugyldige linjer i filen
+skal ignoreres.
+
+Et resultat skal bare vurderes for topplisten når spillet avsluttes ved
+kollisjon med veggen eller slangens egen kropp. Et spill som avsluttes
+frivillig med Esc, skal ikke lagres i topplisten.
+
+Endringer til Version 1.1 under denne linjen
+
+1. Hovedmenyen, inkludert tittelen og menyvalgene, skal vises i gul farge
+   og være midtstilt horisontalt i terminalvinduet. Topplisten beholder
+   eksisterende visning.
+
+2. Spillebrettet skal være sentrert både horisontalt og vertikalt i
+   terminalvinduet. Statuslinjen skal vises rett under det sentrerte
+   spillebrettet.
+
+Endringer til Version 1.2 under denne linjen
+
+1. Den sentrerte hovedmenyen skal vises inne i en tydelig boks. Tittelen,
+   menyvalgene og valgprompten skal ha jevn innrykk, avstand og justering
+   inne i boksen. Topplisten skal fortsatt vises utenfor menyboksen.
+
+2. Terminalvinduets tittel skal settes til "Snake 1.2" når programmet
+   starter. Tittelen skal bruke programmets aktuelle versjonsnummer ved
+   senere versjoner.
+
+3. Innholdet i "toppliste.txt" skal krypteres med TEA. Teksten "CodeX"
+   skal brukes til å utlede den 128-biters nøkkelen som TEA krever. Filen
+   skal også ha en nøkkelbasert integritetskontroll, slik at manuell eller
+   ugyldig redigering oppdages og den manipulerte topplisten avvises.
+   Krypteringen skal ikke endre hvordan topplisten vises i spillet.
+
+4. Hver oppføring på topplisten skal lagres med tidspunktet da resultatet
+   ble oppnådd. En oppføring skal automatisk slettes når den er 15 dager
+   gammel. Utløpte oppføringer skal fjernes når programmet starter og før
+   topplisten vises eller lagres. Nyere oppføringer fra samme spiller skal
+   ikke slettes. Tidspunktet skal lagres i den krypterte filen.
+
+5. Tallvalg i hovedmenyen og menyen for brettstørrelse skal aktiveres
+   umiddelbart når spilleren trykker på et gyldig tall. Enter skal ikke
+   være nødvendig etter et menyvalg. Spillernavnet skal fortsatt
+   bekreftes med Enter.
+
+Endringer til Version 1.3 under denne linjen
+
+1. TEA-formatet skal erstattes med autentisert XChaCha20-Poly1305-
+   kryptering fra libsodium. Nøkkelen skal fortsatt utledes fra "CodeX".
+
+2. Den binære topplisten skal bruke filnavnet "toppliste.dat". En
+   eksisterende "toppliste.txt" skal migreres automatisk uten tap av
+   gyldige resultater.
+
+3. Topplisten skal lagres atomisk via en midlertidig fil som kontrolleres
+   og deretter erstatter den gamle filen.
+
+4. Hvis terminalen blir for liten under et spill, skal spillet pauses og
+   vise en beskjed til vinduet igjen er stort nok.
+
+5. Spillvisningen skal redusere flimring ved å oppdatere bare rutene og
+   statusinformasjonen som har endret seg. En full nytegning skal bare
+   brukes ved oppstart eller endring av terminalstørrelsen.
+
+6. Grensen på 50 tegn i spillernavnet skal måles som gyldige UTF-8-tegn,
+   ikke som antall byte.
+
+7. Versjonsnummeret skal defineres ett sted i kildekoden og gjenbrukes i
+   terminaltittelen, hovedmenyen og andre versjonstekster.
+
+8. Det skal finnes automatiske tester for topplistesortering, like
+   poengsummer, 15-dagers utløp, kryptering/dekryptering og avvisning av
+   manipulert lagringsfil.
+
+9. Prosjektet skal organiseres med kildekode i "src/", deklarasjoner i
+   "include/", tester i "tests/", dokumentasjon i "docs/", genererte
+   programmer i "build/" og vedvarende topplistedata i "data/".
+   Kommandoen "make clean" skal aldri slette topplistedata.
