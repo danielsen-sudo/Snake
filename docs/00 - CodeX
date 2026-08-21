@@ -132,3 +132,24 @@ Endringer til Version 1.3 under denne linjen
    "include/", tester i "tests/", dokumentasjon i "docs/", genererte
    programmer i "build/" og vedvarende topplistedata i "data/".
    Kommandoen "make clean" skal aldri slette topplistedata.
+
+Endringer til Version 1.4 under denne linjen
+
+1. Teksten "CodeX" skal ikke lagres lesbart som én sammenhengende streng i
+   kildekoden eller den kompilerte programfilen. Nøkkelmaterialet skal
+   rekonstrueres ved kjøring fra separate, transformerte deler, brukes til
+   nøkkelutledning og deretter slettes fra minnet med "sodium_memzero".
+   Løsningen skal gjøre enkel søking og strenginspeksjon betydelig
+   vanskeligere, men skal dokumenteres som obfuskering og ikke som absolutt
+   beskyttelse mot full reverse engineering.
+
+2. Hovedmenyboksen skal være nøyaktig sentrert i terminalvinduet. Tittelen,
+   menyvalgene og hjelpeteksten skal sentreres inne i boksen med beregnede
+   mellomrom, jevn linjeavstand og konsekvent justering. Ingen tekst skal
+   fremstå forskjøvet i forhold til de andre menylinjene.
+
+3. Startskjermen skal bare vise de tre høyest rangerte resultatene. Det
+   skal legges til et nytt hovedmenyvalg for å vise hele topplisten med
+   opptil ti resultater. Hovedmenyen skal bruke valgene "1. Nytt spill",
+   "2. Vis toppliste" og "3. Avslutt", og hvert valg skal fortsatt
+   aktiveres direkte uten Enter.

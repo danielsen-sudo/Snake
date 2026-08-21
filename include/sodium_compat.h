@@ -8,6 +8,7 @@
 #define crypto_aead_xchacha20poly1305_ietf_ABYTES 16U
 
 int sodium_init(void);
+void sodium_memzero(void *buffer, size_t length);
 void randombytes_buf(void *buffer, size_t size);
 int crypto_generichash(unsigned char *out, size_t outlen,
                        const unsigned char *in, unsigned long long inlen,

@@ -16,7 +16,7 @@
 
 #include "../include/sodium_compat.h"
 
-#define GAME_VERSION "1.3"
+#define GAME_VERSION "1.4"
 #define SCORE_FILE "data/toppliste.dat"
 #define LEGACY_SCORE_FILE "toppliste.txt"
 #define MAX_SCORES 10
@@ -234,22 +234,56 @@ static uint64_t read_u64_be(const uint8_t *bytes)
     return ((uint64_t)read_u32_be(bytes) << 32) | read_u32_be(bytes + 4);
 }
 
+static void reconstruct_score_secret(uint8_t secret[5])
+{
+    static volatile const uint8_t encoded_even[3] = {0xe6, 0x58, 0xa8};
+    static volatile const uint8_t masks_even[3] = {0xa5, 0x3c, 0xf0};
+    static volatile const uint8_t encoded_odd[2] = {0x34, 0xa2};
+    static volatile const uint8_t masks_odd[2] = {0x5b, 0xc7};
+
+    secret[0] = encoded_even[0] ^ masks_even[0];
+    secret[2] = encoded_even[1] ^ masks_even[1];
+    secret[4] = encoded_even[2] ^ masks_even[2];
+    secret[1] = encoded_odd[0] ^ masks_odd[0];
+    secret[3] = encoded_odd[1] ^ masks_odd[1];
+}
+
 static void derive_key(const char *purpose, uint32_t key[4])
 {
-    const char *secret = "CodeX";
+    uint8_t secret[5];
     int part;
 
+    reconstruct_score_secret(secret);
     for (part = 0; part < 4; ++part) {
         uint32_t hash = 2166136261u ^ ((uint32_t)part * 0x9e3779b9u);
         const unsigned char *cursor;
-        for (cursor = (const unsigned char *)secret; *cursor != '\0'; ++cursor) {
-            hash = (hash ^ *cursor) * 16777619u;
+        int secret_index;
+        for (secret_index = 0; secret_index < 5; ++secret_index) {
+            hash = (hash ^ secret[secret_index]) * 16777619u;
         }
         for (cursor = (const unsigned char *)purpose; *cursor != '\0'; ++cursor) {
             hash = (hash ^ *cursor) * 16777619u;
         }
         key[part] = hash;
     }
+    sodium_memzero(secret, sizeof(secret));
+}
+
+static bool derive_score_key(uint8_t key[crypto_aead_xchacha20poly1305_ietf_KEYBYTES])
+{
+    uint8_t secret[5];
+    static const uint8_t context[16] = {
+        'S', 'n', 'a', 'k', 'e', ' ', 's', 'c',
+        'o', 'r', 'e', 's', ' ', '1', '.', '3'
+    };
+    int result;
+
+    reconstruct_score_secret(secret);
+    result = crypto_generichash(key,
+                                crypto_aead_xchacha20poly1305_ietf_KEYBYTES,
+                                secret, sizeof(secret), context, sizeof(context));
+    sodium_memzero(secret, sizeof(secret));
+    return result == 0;
 }
 
 static void tea_encrypt_block(uint8_t block[8], const uint32_t key[4])
@@ -302,6 +336,7 @@ static void score_mac(const uint8_t *data, size_t length, uint8_t tag[8])
         }
         tea_encrypt_block(tag, key);
     }
+    sodium_memzero(key, sizeof(key));
 }
 
 static bool write_scores(const Score scores[MAX_SCORES], int count)
@@ -335,12 +370,16 @@ static bool write_scores(const Score scores[MAX_SCORES], int count)
 
     memcpy(file_data, magic, sizeof(magic));
     randombytes_buf(file_data + 8, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    if (crypto_generichash(key, sizeof(key), (const unsigned char *)"CodeX", 5,
-                           (const unsigned char *)"Snake scores 1.3", 16) != 0 ||
-        crypto_aead_xchacha20poly1305_ietf_encrypt(
-            file_data + 8 + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
-            &cipher_length, plaintext, plain_length, magic, sizeof(magic), NULL,
-            file_data + 8, key) != 0) {
+    if (!derive_score_key(key)) {
+        fputs("Kunne ikke utlede krypteringsnøkkelen.\n", stderr);
+        return false;
+    }
+    index = crypto_aead_xchacha20poly1305_ietf_encrypt(
+        file_data + 8 + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
+        &cipher_length, plaintext, plain_length, magic, sizeof(magic), NULL,
+        file_data + 8, key);
+    sodium_memzero(key, sizeof(key));
+    if (index != 0) {
         fputs("Kunne ikke kryptere topplisten.\n", stderr);
         return false;
     }
@@ -500,6 +539,7 @@ static int load_legacy_scores(Score scores[MAX_SCORES])
             }
             memcpy(previous, current, 8);
         }
+        sodium_memzero(key, sizeof(key));
         data[24 + plain_length] = '\0';
         count = parse_score_text((char *)data + 24, scores, 0, false);
         {
@@ -566,16 +606,21 @@ static int load_scores(Score scores[MAX_SCORES])
     }
     fclose(file);
 
-    if (memcmp(data, magic, sizeof(magic)) != 0 ||
-        crypto_generichash(key, sizeof(key), (const unsigned char *)"CodeX", 5,
-                           (const unsigned char *)"Snake scores 1.3", 16) != 0 ||
-        crypto_aead_xchacha20poly1305_ietf_decrypt(
-            plaintext, &plain_length, NULL,
-            data + 8 + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
-            (unsigned long long)size - 8 -
-                crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
-            magic, sizeof(magic), data + 8, key) != 0 ||
-        plain_length >= (unsigned long long)size) {
+    if (memcmp(data, magic, sizeof(magic)) != 0 || !derive_score_key(key)) {
+        fprintf(stderr, "Advarsel: %s er endret eller ugyldig og ble avvist.\n",
+                SCORE_FILE);
+        free(data);
+        free(plaintext);
+        return 0;
+    }
+    count = crypto_aead_xchacha20poly1305_ietf_decrypt(
+        plaintext, &plain_length, NULL,
+        data + 8 + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
+        (unsigned long long)size - 8 -
+            crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
+        magic, sizeof(magic), data + 8, key);
+    sodium_memzero(key, sizeof(key));
+    if (count != 0 || plain_length >= (unsigned long long)size) {
         fprintf(stderr, "Advarsel: %s er endret eller ugyldig og ble avvist.\n",
                 SCORE_FILE);
         free(data);
@@ -606,15 +651,16 @@ static void refresh_expired_scores(Score scores[MAX_SCORES], int *count)
     }
 }
 
-static void show_scores(const Score scores[MAX_SCORES], int count)
+static void show_scores(const Score scores[MAX_SCORES], int count, int limit)
 {
     int index;
+    int shown = count < limit ? count : limit;
 
     puts("\n========== TOPPLISTE ==========");
     if (count == 0) {
         puts("Ingen resultater ennå.");
     } else {
-        for (index = 0; index < count; ++index) {
+        for (index = 0; index < shown; ++index) {
             printf("%2d. %-50s %5d\n", index + 1, scores[index].name,
                    scores[index].score);
         }
@@ -706,9 +752,10 @@ static void show_main_menu_box(void)
     print_menu_box_line(title);
     print_menu_box_line("");
     print_menu_box_line("1. Nytt spill");
-    print_menu_box_line("2. Avslutt");
+    print_menu_box_line("2. Vis toppliste");
+    print_menu_box_line("3. Avslutt");
     print_menu_box_line("");
-    print_menu_box_line("Trykk 1 eller 2");
+    print_menu_box_line("Trykk 1, 2 eller 3");
     print_menu_box_line("");
     print_centered_yellow("+--------------------------------+");
 }
@@ -1120,12 +1167,19 @@ int main(void)
 
         refresh_expired_scores(scores, &score_count);
         fputs(ANSI_CLEAR, stdout);
-        show_scores(scores, score_count);
+        show_scores(scores, score_count, 3);
         putchar('\n');
         show_main_menu_box();
-        choice = read_single_choice(1, 2);
-        if (choice == 2) {
+        choice = read_single_choice(1, 3);
+        if (choice == 3) {
             break;
+        }
+        if (choice == 2) {
+            fputs(ANSI_CLEAR, stdout);
+            refresh_expired_scores(scores, &score_count);
+            show_scores(scores, score_count, MAX_SCORES);
+            wait_for_enter();
+            continue;
         }
 
         {
@@ -1153,7 +1207,7 @@ int main(void)
                 (void)save_score(scores, &score_count, player_name, final_length);
             }
             refresh_expired_scores(scores, &score_count);
-            show_scores(scores, score_count);
+            show_scores(scores, score_count, MAX_SCORES);
             wait_for_enter();
         }
     }

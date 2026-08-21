@@ -1,4 +1,4 @@
-# Snake 1.3
+# Snake 1.4
 
 Terminalbasert Snake skrevet i C for Linux.
 
@@ -10,7 +10,8 @@ make
 ```
 
 Slangen styres med piltastene. Trykk `Esc` for å avbryte et aktivt spill.
-Menyvalg aktiveres direkte med talltastene, uten Enter. Topplisten
+Menyvalg aktiveres direkte med talltastene, uten Enter. Startskjermen viser
+de tre beste resultatene, mens hele topplisten åpnes fra menyvalg 2. Topplisten
 opprettes automatisk i `data/toppliste.dat`, krypteres og autentiseres med
 XChaCha20-Poly1305 fra libsodium og fjerner resultater som er 15 dager
 gamle. Et eldre `toppliste.txt` migreres automatisk.

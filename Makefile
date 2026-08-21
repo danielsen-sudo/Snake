@@ -15,8 +15,13 @@ $(BUILD_DIR):
 $(PROGRAM): src/snake.c include/sodium_compat.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) src/snake.c -o $(PROGRAM) $(SODIUM_LIBS)
 
-test: $(TEST_PROGRAM)
+test: $(PROGRAM) $(TEST_PROGRAM)
 	./$(TEST_PROGRAM)
+	@if strings $(PROGRAM) | grep -F 'CodeX' >/dev/null; then \
+		echo "Feil: lesbart nøkkelmateriale funnet i programfilen"; exit 1; \
+	else \
+		echo "Ingen lesbar nøkkelstreng funnet i programfilen."; \
+	fi
 
 $(TEST_PROGRAM): tests/tests.c src/snake.c include/sodium_compat.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) tests/tests.c -o $(TEST_PROGRAM) $(SODIUM_LIBS)
