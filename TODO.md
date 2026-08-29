@@ -1,7 +1,6 @@
-# TODO etter 1.5.0
+# Oppfølging etter 1.5.0
 
-Disse oppgavene er bevisst utsatt til etter den nåværende
-release-forberedelsen:
+Disse oppgavene ble utsatt under release-forberedelsen og er nå fullført:
 
 - [x] CI som kjører `make test`, `make test-gui` og `make test-sanitize`.
 - [x] MIT-lisens lagt til som `LICENSE`.

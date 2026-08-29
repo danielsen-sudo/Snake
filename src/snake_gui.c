@@ -28,6 +28,12 @@ typedef enum {
     VIEW_MENU, VIEW_SCORES, VIEW_NAME, VIEW_BOARD, VIEW_GAME, VIEW_GAME_OVER
 } View;
 
+/*
+ * Normal flyt: MENU -> NAME -> BOARD -> GAME -> GAME_OVER -> MENU.
+ * SCORES er en modal avstikker fra MENU. Esc går ett nivå tilbake, mens Esc
+ * under GAME avbryter runden uten lagring. R starter GAME på samme brett igjen.
+ */
+
 static void color(SDL_Renderer *r, Uint8 red, Uint8 green, Uint8 blue)
 {
     SDL_SetRenderDrawColor(r, red, green, blue, 255);
@@ -157,10 +163,13 @@ static void score_rows(SDL_Renderer *r, const Score scores[MAX_SCORES],
 
 static void menu(SDL_Renderer *r, const Score scores[MAX_SCORES], int count)
 {
+    char title[64];
+
     background(r);
     panel(r, (SDL_FRect){220, 65, 520, 525});
     color(r, 68, 220, 132);
-    centered(r, 96, 3, "SNAKE 1.5.0");
+    snprintf(title, sizeof(title), "SNAKE %s", GAME_VERSION);
+    centered(r, 96, 3, title);
     color(r, 137, 151, 160);
     centered(r, 140, 1.25f, "SDL3 EDITION");
     color(r, 255, 204, 80);
@@ -319,7 +328,7 @@ static void game_view(SDL_Renderer *r, const GameState *game, bool paused,
 }
 
 static void game_over_view(SDL_Renderer *r, const GameState *game,
-                           int final_rank, const char *name)
+                           int final_rank, const char *name, bool score_saved)
 {
     char result[160];
     background(r);
@@ -340,8 +349,15 @@ static void game_over_view(SDL_Renderer *r, const GameState *game,
                  MAX_SCORES);
     color(r, 255, 204, 80);
     centered(r, 330, 1.5f, result);
-    color(r, 68, 220, 132);
-    centered(r, 375, 1.0f, "RESULTATET ER LAGRET");
+    if (final_rank > MAX_SCORES) {
+        color(r, 137, 151, 160);
+        centered(r, 375, 1.0f, "RESULTATET KOM IKKE PAA TOPPLISTEN");
+    } else {
+        color(r, score_saved ? 68 : 255, score_saved ? 220 : 91,
+              score_saved ? 132 : 105);
+        centered(r, 375, 1.0f, score_saved ? "RESULTATET ER LAGRET"
+                                          : "RESULTATET KUNNE IKKE LAGRES");
+    }
     color(r, 112, 129, 139);
     centered(r, 420, 1, "R: SPILL IGJEN  |  ENTER: HOVEDMENY");
 }
@@ -411,7 +427,9 @@ int main(int argc, char **argv)
     Uint64 next_step = 0;
     int final_rank = 0;
     bool paused = false;
+    bool score_saved = false;
     char player_name[MAX_NAME_BYTES + 1] = "";
+    char window_title[64];
     int score_count;
     View view = VIEW_MENU;
     bool running = true;
@@ -433,7 +451,8 @@ int main(int argc, char **argv)
     ui_font = open_ui_font();
     if (ui_font == NULL)
         fprintf(stderr, "Fant ikke Noto Sans; bruker SDL reservefont.\n");
-    if (!SDL_CreateWindowAndRenderer("Snake 1.5.0 - SDL3", WINDOW_WIDTH,
+    snprintf(window_title, sizeof(window_title), "Snake %s - SDL3", GAME_VERSION);
+    if (!SDL_CreateWindowAndRenderer(window_title, WINDOW_WIDTH,
                                      WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE,
                                      &window, &renderer)) {
         fprintf(stderr, "Kunne ikke lage vinduet: %s\n", SDL_GetError());
@@ -478,7 +497,7 @@ int main(int argc, char **argv)
                     int added_characters = utf8_character_count(event.text.text);
                     if (used + added <= MAX_NAME_BYTES &&
                         current_characters >= 0 && added_characters >= 0 &&
-                        current_characters + added_characters <= 24) {
+                        current_characters + added_characters <= MAX_NAME_CHARS) {
                         memcpy(player_name + used, event.text.text, added + 1);
                     }
                 } else if (key == SDL_SCANCODE_BACKSPACE &&
@@ -504,6 +523,7 @@ int main(int argc, char **argv)
                     if (game_init(&game, selected)) {
                         paused = false;
                         final_rank = 0;
+                        score_saved = false;
                         next_step = SDL_GetTicks() + START_DELAY_MS;
                         view = VIEW_GAME;
                     }
@@ -554,8 +574,8 @@ int main(int argc, char **argv)
             while (view == VIEW_GAME && now >= next_step) {
                 if (!game_step(&game)) {
                     final_rank = score_rank(scores, score_count, game.length);
-                    (void)save_score(scores, &score_count, player_name,
-                                     game.length);
+                    score_saved = save_score(scores, &score_count, player_name,
+                                             game.length);
                     view = VIEW_GAME_OVER;
                 } else {
                     next_step += (Uint64)game_delay_ms(&game);
@@ -571,7 +591,8 @@ int main(int argc, char **argv)
             else if (view == VIEW_BOARD) board_view(renderer);
             else if (view == VIEW_GAME)
                 game_view(renderer, &game, paused, scores, score_count);
-            else game_over_view(renderer, &game, final_rank, player_name);
+            else game_over_view(renderer, &game, final_rank, player_name,
+                                score_saved);
             SDL_RenderPresent(renderer);
             needs_redraw = false;
         }

@@ -5,3 +5,4 @@ data/*.tmp
 .git-local/
 .git-data/
 Historie/
+.~lock.*#

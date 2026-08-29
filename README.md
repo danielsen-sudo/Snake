@@ -12,9 +12,10 @@ make
 ./build/snake
 ```
 
-## SDL3-prototype
+## Grafisk SDL3-versjon
 
-SDL3 ligger lokalt i `.deps/sdl3`. Bygg og start GUI-vinduet med:
+Når SDL3 og SDL3_ttf er installert lokalt i `.deps/sdl3`, bygges og startes
+GUI-et med:
 
 ```sh
 make gui
@@ -31,11 +32,13 @@ Game Over starter `R` en ny runde på samme brett.
 ### SDL3 for utviklere
 
 Den lokale SDL3-installasjonen ligger i `.deps/sdl3` og er ignorert av Git.
-På Ubuntu-baserte systemer krever bygget CMake, Ninja, XRandR, FreeType og
-HarfBuzz:
+På Ubuntu-baserte systemer krever bootstrap-skriptet en C-kompilator, `curl`,
+`pkg-config`, CMake, Ninja, XRandR, FreeType og HarfBuzz. Selve spillet krever
+også libsodium:
 
 ```sh
-sudo apt install cmake ninja-build libxrandr-dev libfreetype-dev libharfbuzz-dev
+sudo apt install build-essential curl pkg-config cmake ninja-build \
+  libxrandr-dev libfreetype-dev libharfbuzz-dev libsodium-dev
 ```
 
 Bygg deretter de fastlåste og sjekksumverifiserte versjonene av SDL3 og
@@ -71,10 +74,27 @@ installerte kjørebiblioteket direkte dersom utviklingspakken mangler.
 
 ```sh
 make test
+make test-gui
+make test-sanitize
 ```
 
-Testene dekker sortering, like poengsummer, utløp, kryptert innlasting og
-avvisning av manipulert lagringsdata.
+Testene dekker blant annet spillmotoren, rangering, validering, utløp,
+migrering, kryptert innlasting og avvisning av manipulert lagringsdata.
+GUI-testen inkluderer en vindusløs SDL-røyktest. Sanitizer-målet kjører
+motor- og topplistetestene med AddressSanitizer og UndefinedBehaviorSanitizer.
+
+## Release-pakke
+
+Bygg begge programmene og lag et runtime-arkiv med:
+
+```sh
+make package
+```
+
+Arkivet skrives til `build/snake-1.5.0-runtime.tar.gz` og inneholder CLI,
+GUI, README, MIT-lisensen og GUI-fonten med fontlisens. Byggemiljøet i
+`.deps/`, tester og aktive spillerdata tas ikke med. Målmaskinen må ha
+libsodium, SDL3 og SDL3_ttf som kompatible delte biblioteker.
 
 ## Prosjektstruktur
 
@@ -87,4 +107,5 @@ avvisning av manipulert lagringsdata.
 - `build/` inneholder genererte programmer.
 - `data/` kan inneholde eldre topplistedata som migreres ved første oppstart.
 
-Planlagte, utsatte oppgaver står i [TODO.md](TODO.md).
+Status for oppgavene som ble utsatt under 1.5.0-arbeidet står i
+[TODO.md](TODO.md).

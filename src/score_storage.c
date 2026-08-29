@@ -14,6 +14,11 @@ static char temp_path[PATH_MAX];
 static char legacy_path[PATH_MAX];
 static bool initialized;
 
+/*
+ * Stiene beregnes én gang per prosess. Miljøvariablene må derfor settes før
+ * første kall til en score_*_path()-funksjon; dette er særlig viktig i tester.
+ */
+
 static bool join_path(char output[PATH_MAX], const char *directory,
                       const char *filename)
 {

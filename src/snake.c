@@ -177,6 +177,22 @@ static void wait_for_enter(void)
 
 static const uint8_t SCORE_MAGIC[8] = {'S', 'N', 'K', '1', '2', 'T', 'E', 'A'};
 
+/*
+ * Topplisteformater og migreringsrekkefølge
+ * -----------------------------------------
+ * Aktiv fil, toppliste.dat:
+ *   8 byte "SNK13XCP" || 24 byte nonce || XChaCha20-Poly1305-data med tag.
+ * Klarteksten inni er én UTF-8-linje per resultat:
+ *   <Unix-tid> TAB <poeng> TAB <navn> LF
+ * Magic-verdien brukes også som additional data, slik at formatidentiteten
+ * autentiseres sammen med innholdet.
+ *
+ * Når den aktive filen mangler, prøves toppliste.txt. Den kan være gammel
+ * klartekst (<poeng> TAB <navn>) eller versjon 1.2 sitt TEA/CBC-format med
+ * integritetstag. Gyldige og ikke-utløpte oppføringer skrives til aktivt
+ * format. Den gamle filen beholdes som lokal sikkerhetskopi.
+ */
+
 static bool ensure_data_directory(void)
 {
     return score_file_path()[0] != '\0';
@@ -535,9 +551,7 @@ int load_scores(Score scores[MAX_SCORES])
             return 0;
         }
         count = load_legacy_scores(scores);
-        if (write_scores(scores, count)) {
-            (void)unlink(legacy_score_file_path());
-        }
+        (void)write_scores(scores, count);
         return count;
     }
     if (fseek(file, 0, SEEK_END) != 0 || (size = ftell(file)) < 48 ||
@@ -622,6 +636,23 @@ bool save_score(Score scores[MAX_SCORES], int *count,
 {
     int position = 0;
     int index;
+    size_t name_length;
+    int character_count;
+
+    if (scores == NULL || count == NULL || name == NULL ||
+        *count < 0 || *count > MAX_SCORES || value < 1 || value > 1000000) {
+        return false;
+    }
+    name_length = strlen(name);
+    if (name_length == 0 || name_length > MAX_NAME_BYTES ||
+        strchr(name, '\t') != NULL || strchr(name, '\n') != NULL ||
+        strchr(name, '\r') != NULL) {
+        return false;
+    }
+    character_count = utf8_character_count(name);
+    if (character_count < 1 || character_count > MAX_NAME_CHARS) {
+        return false;
+    }
 
     *count = remove_expired_scores(scores, *count);
 
