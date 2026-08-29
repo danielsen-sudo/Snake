@@ -1,5 +1,7 @@
 build/
+.deps/
 data/toppliste.dat
 data/*.tmp
 .git-local/
 .git-data/
+Historie/

@@ -1,8 +1,16 @@
-#define main snake_game_main
-#include "../src/snake.c"
-#undef main
+#define _POSIX_C_SOURCE 200809L
+
+#include "../include/scores.h"
+#include "../include/sodium_compat.h"
 
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+/* Testene bruker en midlertidig arbeidsmappe og berører aldri spillerens data. */
 
 static void test_sorting_and_equal_scores(void)
 {
@@ -42,7 +50,7 @@ static void test_encryption_and_tamper_detection(void)
     assert(strcmp(loaded[0].name, "Åse") == 0);
     assert(loaded[0].score == 42);
 
-    file = fopen(SCORE_FILE, "r+b");
+    file = fopen(score_file_path(), "r+b");
     assert(file != NULL);
     assert(fseek(file, 40, SEEK_SET) == 0);
     byte = fgetc(file);
@@ -60,6 +68,7 @@ int main(void)
 
     assert(getcwd(original_directory, sizeof(original_directory)) != NULL);
     assert(mkdtemp(temporary) != NULL);
+    assert(setenv("SNAKE_DATA_DIR", temporary, 1) == 0);
     assert(chdir(temporary) == 0);
     assert(sodium_init() >= 0);
 
@@ -67,9 +76,8 @@ int main(void)
     test_expiration();
     test_encryption_and_tamper_detection();
 
-    (void)unlink(SCORE_FILE);
-    (void)unlink(SCORE_FILE ".tmp");
-    assert(rmdir("data") == 0);
+    (void)unlink(score_file_path());
+    (void)unlink(score_temp_file_path());
     assert(chdir(original_directory) == 0);
     assert(rmdir(temporary) == 0);
     puts("Alle tester bestått.");

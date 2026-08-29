@@ -1,5 +1,12 @@
 #define _POSIX_C_SOURCE 200809L
 
+/*
+ * Delt implementasjon for toppliste og terminalgrensesnitt.
+ * Selve spillreglene og GameState ligger i game.c.
+ * Offentlige funksjoner er deklarert i snake_shared.h; resten er lokale
+ * detaljer og skal ikke brukes direkte av SDL3-grensesnittet.
+ */
+
 #include <errno.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -15,17 +22,11 @@
 #include <unistd.h>
 
 #include "../include/sodium_compat.h"
+#include "../include/snake_shared.h"
+#include "../include/game.h"
+#include "../include/scores.h"
+#include "../include/score_crypto.h"
 
-#define GAME_VERSION "1.4"
-#define SCORE_FILE "data/toppliste.dat"
-#define LEGACY_SCORE_FILE "toppliste.txt"
-#define MAX_SCORES 10
-#define MAX_NAME_CHARS 50
-#define MAX_NAME_BYTES (MAX_NAME_CHARS * 4)
-#define START_DELAY_MS 200
-#define MIN_DELAY_MS 50
-#define SPEED_STEP_MS 10
-#define SCORE_LIFETIME_SECONDS (15LL * 24LL * 60LL * 60LL)
 
 #define ANSI_CLEAR "\033[2J\033[H"
 #define ANSI_HOME "\033[H"
@@ -38,37 +39,7 @@
 #define ANSI_ALT_ON "\033[?1049h"
 #define ANSI_ALT_OFF "\033[?1049l"
 
-typedef struct {
-    int x;
-    int y;
-} Point;
-
-typedef struct {
-    char name[MAX_NAME_BYTES + 1];
-    int score;
-    int64_t created_at;
-} Score;
-
-typedef struct {
-    int width;
-    int height;
-    const char *name;
-} BoardPreset;
-
-typedef enum {
-    DIR_UP,
-    DIR_DOWN,
-    DIR_LEFT,
-    DIR_RIGHT
-} Direction;
-
-typedef enum {
-    END_COLLISION,
-    END_ESCAPE,
-    END_BOARD_FULL
-} EndReason;
-
-static const BoardPreset PRESETS[] = {
+const BoardPreset PRESETS[4] = {
     {40, 20, "Standard"},
     {30, 15, "Kompakt"},
     {60, 25, "Stor"},
@@ -139,7 +110,7 @@ static void trim_line(char *text)
     }
 }
 
-static int utf8_character_count(const char *text)
+int utf8_character_count(const char *text)
 {
     const unsigned char *bytes = (const unsigned char *)text;
     int count = 0;
@@ -208,11 +179,7 @@ static const uint8_t SCORE_MAGIC[8] = {'S', 'N', 'K', '1', '2', 'T', 'E', 'A'};
 
 static bool ensure_data_directory(void)
 {
-    if (mkdir("data", 0700) == 0 || errno == EEXIST) {
-        return true;
-    }
-    fprintf(stderr, "Kunne ikke opprette datamappen: %s\n", strerror(errno));
-    return false;
+    return score_file_path()[0] != '\0';
 }
 
 static uint32_t read_u32_be(const uint8_t *bytes)
@@ -236,6 +203,7 @@ static uint64_t read_u64_be(const uint8_t *bytes)
 
 static void reconstruct_score_secret(uint8_t secret[5])
 {
+    /* Obfuskering, ikke hemmelighold: unngår én søkbar nøkkelstreng i binæren. */
     static volatile const uint8_t encoded_even[3] = {0xe6, 0x58, 0xa8};
     static volatile const uint8_t masks_even[3] = {0xa5, 0x3c, 0xf0};
     static volatile const uint8_t encoded_odd[2] = {0x34, 0xa2};
@@ -267,23 +235,6 @@ static void derive_key(const char *purpose, uint32_t key[4])
         key[part] = hash;
     }
     sodium_memzero(secret, sizeof(secret));
-}
-
-static bool derive_score_key(uint8_t key[crypto_aead_xchacha20poly1305_ietf_KEYBYTES])
-{
-    uint8_t secret[5];
-    static const uint8_t context[16] = {
-        'S', 'n', 'a', 'k', 'e', ' ', 's', 'c',
-        'o', 'r', 'e', 's', ' ', '1', '.', '3'
-    };
-    int result;
-
-    reconstruct_score_secret(secret);
-    result = crypto_generichash(key,
-                                crypto_aead_xchacha20poly1305_ietf_KEYBYTES,
-                                secret, sizeof(secret), context, sizeof(context));
-    sodium_memzero(secret, sizeof(secret));
-    return result == 0;
 }
 
 static void tea_encrypt_block(uint8_t block[8], const uint32_t key[4])
@@ -339,12 +290,15 @@ static void score_mac(const uint8_t *data, size_t length, uint8_t tag[8])
     sodium_memzero(key, sizeof(key));
 }
 
-static bool write_scores(const Score scores[MAX_SCORES], int count)
+bool write_scores(const Score scores[MAX_SCORES], int count)
 {
+    /*
+     * Filformat: magic || nonce || XChaCha20-Poly1305(ciphertext + tag).
+     * Skriv til .tmp, fsync og rename slik at krasj ikke gir en halv fil.
+     */
     uint8_t plaintext[1024];
     uint8_t file_data[8 + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES +
                       sizeof(plaintext) + crypto_aead_xchacha20poly1305_ietf_ABYTES];
-    uint8_t key[crypto_aead_xchacha20poly1305_ietf_KEYBYTES];
     static const uint8_t magic[8] = {'S', 'N', 'K', '1', '3', 'X', 'C', 'P'};
     size_t plain_length = 0;
     unsigned long long cipher_length = 0;
@@ -370,40 +324,35 @@ static bool write_scores(const Score scores[MAX_SCORES], int count)
 
     memcpy(file_data, magic, sizeof(magic));
     randombytes_buf(file_data + 8, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    if (!derive_score_key(key)) {
-        fputs("Kunne ikke utlede krypteringsnøkkelen.\n", stderr);
-        return false;
-    }
-    index = crypto_aead_xchacha20poly1305_ietf_encrypt(
+    index = !score_crypto_encrypt(
+        plaintext, plain_length, file_data + 8,
         file_data + 8 + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
-        &cipher_length, plaintext, plain_length, magic, sizeof(magic), NULL,
-        file_data + 8, key);
-    sodium_memzero(key, sizeof(key));
-    if (index != 0) {
+        &cipher_length);
+    if (index) {
         fputs("Kunne ikke kryptere topplisten.\n", stderr);
         return false;
     }
     file_length = 8 + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES +
                   (size_t)cipher_length;
 
-    file = fopen(SCORE_FILE ".tmp", "wb");
+    file = fopen(score_temp_file_path(), "wb");
     if (file == NULL) {
-        fprintf(stderr, "Kunne ikke lagre %s: %s\n", SCORE_FILE,
+        fprintf(stderr, "Kunne ikke lagre %s: %s\n", score_file_path(),
                 strerror(errno));
         return false;
     }
     if (fwrite(file_data, 1, file_length, file) != file_length) {
-        fprintf(stderr, "Kunne ikke lagre %s: %s\n", SCORE_FILE,
+        fprintf(stderr, "Kunne ikke lagre %s: %s\n", score_file_path(),
                 strerror(errno));
         fclose(file);
         return false;
     }
     if (fflush(file) == EOF || fsync(fileno(file)) == -1 || fclose(file) == EOF) {
-        fprintf(stderr, "Kunne ikke fullføre lagring av %s.\n", SCORE_FILE);
+        fprintf(stderr, "Kunne ikke fullføre lagring av %s.\n", score_file_path());
         return false;
     }
-    if (rename(SCORE_FILE ".tmp", SCORE_FILE) == -1) {
-        fprintf(stderr, "Kunne ikke erstatte %s: %s\n", SCORE_FILE,
+    if (rename(score_temp_file_path(), score_file_path()) == -1) {
+        fprintf(stderr, "Kunne ikke erstatte %s: %s\n", score_file_path(),
                 strerror(errno));
         return false;
     }
@@ -413,6 +362,7 @@ static bool write_scores(const Score scores[MAX_SCORES], int count)
 static int parse_score_text(char *text, Score scores[MAX_SCORES],
                             int64_t legacy_time, bool legacy)
 {
+    /* Parseren endrer bufferen på stedet og hopper over ugyldige oppføringer. */
     char *line;
     char *save_line = NULL;
     int count = 0;
@@ -463,7 +413,7 @@ static int parse_score_text(char *text, Score scores[MAX_SCORES],
     return count;
 }
 
-static int remove_expired_scores(Score scores[MAX_SCORES], int count)
+int remove_expired_scores(Score scores[MAX_SCORES], int count)
 {
     int64_t now = (int64_t)time(NULL);
     int source;
@@ -480,15 +430,16 @@ static int remove_expired_scores(Score scores[MAX_SCORES], int count)
 
 static int load_legacy_scores(Score scores[MAX_SCORES])
 {
+    /* Leser både gammel klartekst og det tidligere TEA-baserte formatet. */
     struct stat information;
-    FILE *file = fopen(LEGACY_SCORE_FILE, "rb");
+    FILE *file = fopen(legacy_score_file_path(), "rb");
     uint8_t *data;
     long size;
     int count = 0;
 
     if (file == NULL) {
         if (errno != ENOENT) {
-            fprintf(stderr, "Advarsel: Kunne ikke åpne %s: %s\n", LEGACY_SCORE_FILE,
+            fprintf(stderr, "Advarsel: Kunne ikke åpne %s: %s\n", legacy_score_file_path(),
                     strerror(errno));
         }
         return 0;
@@ -522,7 +473,7 @@ static int load_legacy_scores(Score scores[MAX_SCORES])
         }
         if (difference != 0 || plain_length >= padded_length) {
             fprintf(stderr, "Advarsel: %s er endret eller ugyldig og ble avvist.\n",
-                    LEGACY_SCORE_FILE);
+                    legacy_score_file_path());
             free(data);
             return 0;
         }
@@ -551,7 +502,7 @@ static int load_legacy_scores(Score scores[MAX_SCORES])
         }
     } else {
         int64_t legacy_time = (int64_t)time(NULL);
-        if (stat(LEGACY_SCORE_FILE, &information) == 0) {
+        if (stat(legacy_score_file_path(), &information) == 0) {
             legacy_time = (int64_t)information.st_mtime;
         }
         count = parse_score_text((char *)data, scores, legacy_time, true);
@@ -562,13 +513,13 @@ static int load_legacy_scores(Score scores[MAX_SCORES])
     return count;
 }
 
-static int load_scores(Score scores[MAX_SCORES])
+int load_scores(Score scores[MAX_SCORES])
 {
+    /* Autentisering må lykkes før dekryptert innhold tolkes eller brukes. */
     static const uint8_t magic[8] = {'S', 'N', 'K', '1', '3', 'X', 'C', 'P'};
     FILE *file;
     uint8_t *data;
     uint8_t *plaintext;
-    uint8_t key[crypto_aead_xchacha20poly1305_ietf_KEYBYTES];
     unsigned long long plain_length = 0;
     long size;
     int count;
@@ -576,23 +527,23 @@ static int load_scores(Score scores[MAX_SCORES])
     if (!ensure_data_directory()) {
         return 0;
     }
-    file = fopen(SCORE_FILE, "rb");
+    file = fopen(score_file_path(), "rb");
     if (file == NULL) {
         if (errno != ENOENT) {
-            fprintf(stderr, "Advarsel: Kunne ikke åpne %s: %s\n", SCORE_FILE,
+            fprintf(stderr, "Advarsel: Kunne ikke åpne %s: %s\n", score_file_path(),
                     strerror(errno));
             return 0;
         }
         count = load_legacy_scores(scores);
         if (write_scores(scores, count)) {
-            (void)unlink(LEGACY_SCORE_FILE);
+            (void)unlink(legacy_score_file_path());
         }
         return count;
     }
     if (fseek(file, 0, SEEK_END) != 0 || (size = ftell(file)) < 48 ||
         fseek(file, 0, SEEK_SET) != 0) {
         fclose(file);
-        fprintf(stderr, "Advarsel: %s er ugyldig og ble avvist.\n", SCORE_FILE);
+        fprintf(stderr, "Advarsel: %s er ugyldig og ble avvist.\n", score_file_path());
         return 0;
     }
     data = malloc((size_t)size);
@@ -606,23 +557,21 @@ static int load_scores(Score scores[MAX_SCORES])
     }
     fclose(file);
 
-    if (memcmp(data, magic, sizeof(magic)) != 0 || !derive_score_key(key)) {
+    if (memcmp(data, magic, sizeof(magic)) != 0) {
         fprintf(stderr, "Advarsel: %s er endret eller ugyldig og ble avvist.\n",
-                SCORE_FILE);
+                score_file_path());
         free(data);
         free(plaintext);
         return 0;
     }
-    count = crypto_aead_xchacha20poly1305_ietf_decrypt(
-        plaintext, &plain_length, NULL,
+    count = !score_crypto_decrypt(
         data + 8 + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
-        (unsigned long long)size - 8 -
+        (size_t)size - 8 -
             crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
-        magic, sizeof(magic), data + 8, key);
-    sodium_memzero(key, sizeof(key));
+        data + 8, plaintext, &plain_length);
     if (count != 0 || plain_length >= (unsigned long long)size) {
         fprintf(stderr, "Advarsel: %s er endret eller ugyldig og ble avvist.\n",
-                SCORE_FILE);
+                score_file_path());
         free(data);
         free(plaintext);
         return 0;
@@ -641,7 +590,7 @@ static int load_scores(Score scores[MAX_SCORES])
     return count;
 }
 
-static void refresh_expired_scores(Score scores[MAX_SCORES], int *count)
+void refresh_expired_scores(Score scores[MAX_SCORES], int *count)
 {
     int active_count = remove_expired_scores(scores, *count);
 
@@ -668,8 +617,8 @@ static void show_scores(const Score scores[MAX_SCORES], int count, int limit)
     puts("===============================");
 }
 
-static bool save_score(Score scores[MAX_SCORES], int *count,
-                       const char *name, int value)
+bool save_score(Score scores[MAX_SCORES], int *count,
+                const char *name, int value)
 {
     int position = 0;
     int index;
@@ -694,6 +643,17 @@ static bool save_score(Score scores[MAX_SCORES], int *count,
     scores[position].created_at = (int64_t)time(NULL);
     strcpy(scores[position].name, name);
     return write_scores(scores, *count);
+}
+
+int score_rank(const Score scores[MAX_SCORES], int count, int value)
+{
+    int rank = 1;
+    int index;
+
+    /* Eldre resultater beholder plassen foran ved lik poengsum. */
+    for (index = 0; index < count && scores[index].score >= value; ++index)
+        ++rank;
+    return rank;
 }
 
 static bool get_terminal_size(int *columns, int *rows)
@@ -829,51 +789,6 @@ static int select_board(void)
     }
 }
 
-static bool point_equals(Point first, Point second)
-{
-    return first.x == second.x && first.y == second.y;
-}
-
-static bool snake_contains(const Point *snake, int length, Point point)
-{
-    int index;
-
-    for (index = 0; index < length; ++index) {
-        if (point_equals(snake[index], point)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool place_food(Point *food, const Point *snake, int length,
-                       int width, int height)
-{
-    int free_cells = (width - 2) * (height - 2) - length;
-    int target;
-    int seen = 0;
-    int x;
-    int y;
-
-    if (free_cells <= 0) {
-        return false;
-    }
-    target = rand() % free_cells;
-    for (y = 1; y < height - 1; ++y) {
-        for (x = 1; x < width - 1; ++x) {
-            Point candidate = {x, y};
-            if (!snake_contains(snake, length, candidate)) {
-                if (seen == target) {
-                    *food = candidate;
-                    return true;
-                }
-                ++seen;
-            }
-        }
-    }
-    return false;
-}
-
 static void draw_game(const Point *snake, int length, Point food,
                       int width, int height, int level, int delay_ms,
                       bool full_redraw)
@@ -945,14 +860,6 @@ static void draw_game(const Point *snake, int length, Point food,
     fflush(stdout);
 }
 
-static bool directions_are_opposite(Direction first, Direction second)
-{
-    return (first == DIR_UP && second == DIR_DOWN) ||
-           (first == DIR_DOWN && second == DIR_UP) ||
-           (first == DIR_LEFT && second == DIR_RIGHT) ||
-           (first == DIR_RIGHT && second == DIR_LEFT);
-}
-
 /* Returnerer -1 for Esc, 0 for timeout og 1 når retningen ble endret. */
 static int read_game_input(int timeout_ms, Direction current, Direction *next)
 {
@@ -1003,42 +910,29 @@ static int read_game_input(int timeout_ms, Direction current, Direction *next)
 
 static EndReason play_game(const BoardPreset *board, int *final_length)
 {
-    int capacity = (board->width - 2) * (board->height - 2);
-    Point *snake = malloc((size_t)capacity * sizeof(*snake));
-    Point food = {0, 0};
-    int length = 3;
-    int eaten = 0;
+    GameState game = {0};
     int last_columns = -1;
     int last_rows = -1;
-    Direction direction = DIR_RIGHT;
     EndReason reason = END_ESCAPE;
     bool full_redraw = true;
 
-    if (snake == NULL) {
+    if (!game_init(&game, (int)(board - PRESETS))) {
         fputs("Kunne ikke reservere minne til spillebrettet.\n", stderr);
         *final_length = 0;
         return END_ESCAPE;
     }
 
-    snake[0] = (Point){board->width / 2, board->height / 2};
-    snake[1] = (Point){snake[0].x - 1, snake[0].y};
-    snake[2] = (Point){snake[0].x - 2, snake[0].y};
-    (void)place_food(&food, snake, length, board->width, board->height);
-
     if (!enable_game_terminal()) {
         fputs("Spillet krever en interaktiv terminal.\n", stderr);
-        free(snake);
+        game_destroy(&game);
         *final_length = 0;
         return END_ESCAPE;
     }
 
     for (;;) {
-        int delay_ms = START_DELAY_MS - eaten * SPEED_STEP_MS;
-        Direction requested = direction;
+        int delay_ms = game_delay_ms(&game);
+        Direction requested = game.direction;
         int input;
-        Point new_head = snake[0];
-        bool grows;
-        int collision_length;
         int columns = board->width;
         int rows = board->height + 1;
 
@@ -1050,7 +944,7 @@ static EndReason play_game(const BoardPreset *board, int *final_length)
                    rows / 2, board->width, board->height + 1);
             fflush(stdout);
             do {
-                input = read_game_input(250, direction, &requested);
+                input = read_game_input(250, game.direction, &requested);
                 if (input < 0) {
                     reason = END_ESCAPE;
                     goto game_finished;
@@ -1065,52 +959,25 @@ static EndReason play_game(const BoardPreset *board, int *final_length)
             full_redraw = true;
         }
 
-        if (delay_ms < MIN_DELAY_MS) {
-            delay_ms = MIN_DELAY_MS;
-        }
-        draw_game(snake, length, food, board->width, board->height,
-                  eaten + 1, delay_ms, full_redraw);
+        draw_game(game.snake, game.length, game.food,
+                  board->width, board->height, game.eaten + 1,
+                  delay_ms, full_redraw);
         full_redraw = false;
-        input = read_game_input(delay_ms, direction, &requested);
+        input = read_game_input(delay_ms, game.direction, &requested);
         if (input < 0) {
             reason = END_ESCAPE;
             break;
         }
-        direction = requested;
-
-        switch (direction) {
-            case DIR_UP: --new_head.y; break;
-            case DIR_DOWN: ++new_head.y; break;
-            case DIR_LEFT: --new_head.x; break;
-            case DIR_RIGHT: ++new_head.x; break;
-        }
-        grows = point_equals(new_head, food);
-        collision_length = grows ? length : length - 1;
-        if (new_head.x <= 0 || new_head.x >= board->width - 1 ||
-            new_head.y <= 0 || new_head.y >= board->height - 1 ||
-            snake_contains(snake, collision_length, new_head)) {
-            reason = END_COLLISION;
+        (void)game_request_direction(&game, requested);
+        if (!game_step(&game)) {
+            reason = game.reason;
             break;
-        }
-
-        if (grows) {
-            memmove(&snake[1], &snake[0], (size_t)length * sizeof(*snake));
-            snake[0] = new_head;
-            ++length;
-            ++eaten;
-            if (!place_food(&food, snake, length, board->width, board->height)) {
-                reason = END_BOARD_FULL;
-                break;
-            }
-        } else {
-            memmove(&snake[1], &snake[0], (size_t)(length - 1) * sizeof(*snake));
-            snake[0] = new_head;
         }
     }
 
 game_finished:
-    *final_length = length;
-    free(snake);
+    *final_length = game.length;
+    game_destroy(&game);
     restore_terminal();
     return reason;
 }
@@ -1140,7 +1007,7 @@ static bool prompt_player_name(char name[MAX_NAME_BYTES + 1])
     }
 }
 
-int main(void)
+int snake_terminal_main(void)
 {
     Score scores[MAX_SCORES];
     int score_count;

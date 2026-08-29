@@ -153,3 +153,60 @@ Endringer til Version 1.4 under denne linjen
    opptil ti resultater. Hovedmenyen skal bruke valgene "1. Nytt spill",
    "2. Vis toppliste" og "3. Avslutt", og hvert valg skal fortsatt
    aktiveres direkte uten Enter.
+
+Endringer til Version 1.5 GUI under denne linjen
+
+1. Terminalversjonen skal bevares som et eget program i `build/snake`.
+   Den grafiske SDL3-versjonen skal bygges separat som `build/snake_gui`.
+
+2. GUI-et skal ha oppstartsmeny, spillernavn, fire brettvalg, fullverdig
+   spillmotor, Game Over-visning og den samme krypterte topplisten som CLI.
+
+3. Slangen skal kunne styres med piltaster og WASD. `P` eller mellomrom
+   skal pause spillet. Spillet skal pause automatisk når vinduet mister
+   fokus. `Esc` skal avbryte uten å lagre resultatet.
+
+4. Poengsum og gjeldende highscore-rangering skal vises tydelig under
+   spillet. Game Over-skjermen skal vise endelig plassering. `R` skal starte
+   en ny runde på samme brett.
+
+5. SDL-vinduet skal sentreres på den fysiske skjermen hvor musepekeren er
+   ved oppstart. XRandR skal være aktivert for oppsett med flere skjermer.
+
+6. CLI og GUI skal ha separate startpunkter og dele deklarert logikk gjennom
+   `include/snake_shared.h`. Ett grensesnitt skal aldri inkludere det andre
+   grensesnittets `.c`-fil direkte.
+
+7. SDL3 skal kunne bygges reproduserbart med
+   `scripts/bootstrap-sdl3.sh`. Nedlastingen skal bruke en fast versjon og
+   verifisert SHA-256-sjekksum. `.deps/` skal ikke legges i Git.
+
+8. `make test-gui` skal kjøre både en vindusløs SDL-røyktest og tester for
+   vekst, kollisjon og highscore-rangering. Eksisterende CLI- og
+   krypteringstester skal fortsatt bestå.
+
+9. CLI og GUI skal bruke samme `GameState`, `game_step()` og hastighetsregel
+   fra `game.c`. Kollisjons- og vekstregler skal ikke dupliseres i
+   grensesnittene.
+
+10. GUI-et skal bare tegnes på nytt ved spillsteg, tilstandsendring eller
+    relevant vindushendelse. Rendering skal ikke kjøre kontinuerlig når
+    skjermbildet er uendret.
+
+11. `make test-sanitize` skal kjøre motor- og topplistetester med
+    AddressSanitizer og UndefinedBehaviorSanitizer.
+
+12. Versjonen skal være 1.5.0. Topplisten skal lagres under brukerens
+    XDG-datakatalog, med `~/.local/share` som reserve. Eksisterende data i
+    prosjektets `data/`-mappe skal kopieres ved første oppstart, ikke slettes.
+
+13. Aktiv topplistekryptering skal ligge i en egen `score_crypto.c`-modul,
+    mens lagringsstier skal ligge i `score_storage.c`. Støtte for gammel TEA
+    er kun migreringskode.
+
+14. GUI-et skal bruke SDL3_ttf og den medfølgende Noto Sans-fonten. Fontens
+    lisens skal følge kildekoden, og SDL-reservefonten skal brukes dersom
+    fontfilen ikke kan åpnes.
+
+15. `Historie/` skal bevares urørt. Senere arbeid med CI, prosjektlisens,
+    release-pakking og Git/PR-flyt skal dokumenteres i `TODO.md`.
