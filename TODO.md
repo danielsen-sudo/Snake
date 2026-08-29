@@ -7,5 +7,5 @@ release-forberedelsen:
 - [x] MIT-lisens lagt til som `LICENSE`.
 - [x] `make package` pakker runtime-filer uten `.deps/`, byggfiler, tester
       eller aktive spillerdata.
-- [x] Arbeidet flyttes til `feature/sdl3-gui` og commit-es. Pull request
-      krever fortsatt push-tilgang til GitHub-remoten.
+- [x] Arbeidet flyttes til `feature/sdl3-gui`, commit-es, pushes og sendes som
+      pull request [#1](https://github.com/danielsen-sudo/Snake/pull/1).
