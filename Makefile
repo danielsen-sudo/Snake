@@ -11,7 +11,7 @@ SANITIZE_GAME_TEST := $(BUILD_DIR)/snake_game_tests_sanitize
 SANITIZE_FLAGS := -std=c11 -O1 -g -Wall -Wextra -Wpedantic \
 	-fsanitize=address,undefined -fno-omit-frame-pointer
 SDL3_PREFIX ?= $(CURDIR)/.deps/sdl3
-SDL3_PKG_CONFIG := PKG_CONFIG_PATH="$(SDL3_PREFIX)/lib/pkgconfig" pkg-config
+SDL3_PKG_CONFIG := PKG_CONFIG_PATH="$(SDL3_PREFIX)/lib/pkgconfig:$${PKG_CONFIG_PATH}" pkg-config
 SDL3_CFLAGS := $(shell $(SDL3_PKG_CONFIG) --cflags sdl3 2>/dev/null)
 SDL3_LIBS := $(shell $(SDL3_PKG_CONFIG) --libs sdl3 2>/dev/null)
 SDL3_TTF_CFLAGS := $(shell $(SDL3_PKG_CONFIG) --cflags sdl3-ttf 2>/dev/null)
